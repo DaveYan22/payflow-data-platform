@@ -1,0 +1,113 @@
+PAYFLOW DATA PLATFORM - DAILY COMMANDS
+======================================
+Run everything in PowerShell from the project folder:
+    cd C:\Users\davit.ispiryan_payse\Desktop\payflow-data-platform
+
+
+1. START THE DAY
+----------------
+0) Open Docker Desktop first and wait until it says "Engine running".
+   MySQL (source) runs on Windows as the MySQL80 service, it starts on its own.
+
+Start everything (ClickHouse, Airflow, dbt, Superset):
+    docker compose up -d
+
+Or start only what you need:
+    docker compose up -d clickhouse airflow
+    docker compose up -d dbt
+    docker compose up -d superset
+
+Note: the first "docker compose up -d superset" downloads the Superset image (about 1 GB).
+
+Check everything is running (ClickHouse should say "healthy"):
+    docker compose ps
+
+Airflow needs 1-2 minutes after start before the web page opens.
+
+
+2. LINKS
+--------
+Airflow     http://localhost:8080          login: AIRFLOW_ADMIN_USER / AIRFLOW_ADMIN_PASSWORD
+ClickHouse  http://localhost:8123/play     login: CLICKHOUSE_USER / CLICKHOUSE_PASSWORD
+Superset    http://localhost:8088          login: SUPERSET_ADMIN_USER / SUPERSET_ADMIN_PASSWORD
+
+All logins and passwords are in the .env file (never shared). Names above are the .env variables.
+ClickHouse health check (should show "Ok."):  http://localhost:8123/ping
+
+Superset -> ClickHouse connection (Settings > Database Connections > + Database > ClickHouse Connect):
+    host: clickhouse   port: 8123   user/password: CLICKHOUSE_USER / CLICKHOUSE_PASSWORD from .env
+
+DBeaver / DataGrip -> ClickHouse:
+    host: localhost    port: 8123   user/password: CLICKHOUSE_USER / CLICKHOUSE_PASSWORD from .env
+
+Do NOT confuse with the other ClickHouse containers (clickhouse-dbt, clickhouse-airbnb,
+clickhouse-airstats on ports 8124-8126). This project is clickhouse_dwh on port 8123.
+
+
+3. ADD NEW DATA AND LOAD IT
+---------------------------
+Add 3-5% new rows to MySQL:
+    .venv\Scripts\Activate.ps1
+    python source_data\data_generator.py
+
+Load into ClickHouse now (instead of waiting for the hourly run):
+    docker exec airflow airflow dags trigger extract_incremental_loads
+    docker exec airflow airflow dags trigger extract_full_loads
+
+Or in the Airflow UI: open the DAG and press the play button (Trigger DAG).
+
+Schedules: extract_incremental_loads every hour, extract_full_loads daily at 02:00 UTC.
+
+
+4. CHECK THE DATA IN CLICKHOUSE
+-------------------------------
+Row count per bronze table:
+    "SELECT table, sum(rows) AS rows FROM system.parts WHERE active AND database = currentDatabase() GROUP BY table ORDER BY table" | docker exec -i clickhouse_dwh bash -c 'clickhouse-client --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD --database bronze'
+
+Open the ClickHouse SQL terminal (type exit to leave):
+    docker exec -it clickhouse_dwh bash -c 'clickhouse-client --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD'
+
+Last DAG runs and their status:
+    docker exec airflow airflow dags list-runs -d extract_incremental_loads -o table
+    docker exec airflow airflow dags list-runs -d extract_full_loads -o table
+
+
+5. RUN DBT
+----------
+    docker compose exec dbt dbt debug
+    docker compose exec dbt dbt build
+    docker compose exec dbt dbt run --select silver
+    docker compose exec dbt dbt test
+
+
+6. WHEN SOMETHING LOOKS WRONG
+-----------------------------
+Live logs (Ctrl+C to stop watching):
+    docker logs -f airflow
+    docker logs -f clickhouse_dwh
+    docker logs -f superset
+
+Restart one service:
+    docker compose restart airflow
+
+DAG has a Python error:
+    docker exec airflow airflow dags list-import-errors
+
+DAGs show as paused (after "docker compose down"): unpause them in the Airflow UI with the
+toggle on the left, or:
+    docker exec airflow airflow dags unpause extract_incremental_loads
+    docker exec airflow airflow dags unpause extract_full_loads
+
+
+7. END THE DAY
+--------------
+Stop everything, keep all data and Airflow history:
+    docker compose stop
+
+Start again next day with:
+    docker compose start
+
+Careful:
+    docker compose down       removes containers. ClickHouse data is kept, but Airflow forgets
+                              its run history and the DAGs come back paused.
+    docker compose down -v    ALSO DELETES ALL CLICKHOUSE DATA. Only use it to start from zero.
