@@ -1,0 +1,7 @@
+# Local tooling: data generators and notebooks. dbt runs in its own container (see docker-compose.yml).
+mysql-connector-python==9.1.0
+clickhouse-connect==0.8.11
+pandas==2.2.3
+openpyxl==3.1.5
+Faker==33.1.0
+python-dotenv==1.0.1
