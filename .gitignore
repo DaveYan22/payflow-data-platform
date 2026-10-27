@@ -1,0 +1,24 @@
+# Secrets: real logins live only in .env (copy .env.example to create it)
+.env
+
+# Python
+.venv/
+payflow-data-platform/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Airflow runtime
+airflow/logs/*
+!airflow/logs/.gitkeep
+
+# dbt build output
+dbt_transform/target/
+dbt_transform/dbt_packages/
+dbt_transform/logs/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
