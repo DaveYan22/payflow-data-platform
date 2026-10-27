@@ -1,0 +1,97 @@
+# MySQL (source) runs on the Windows host as the MySQL80 service; containers reach it via host.docker.internal.
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    container_name: clickhouse_dwh
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      retries: 10
+
+  airflow:
+    image: apache/airflow:2.10.3-python3.11
+    container_name: airflow
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      _PIP_ADDITIONAL_REQUIREMENTS: "clickhouse-connect==0.8.11 mysql-connector-python==9.1.0 openpyxl==3.1.5"
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate &&
+        (airflow users create --username "$${AIRFLOW_ADMIN_USER}" --password "$${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname Admin --lastname User --role Admin --email admin@example.com || true) &&
+        airflow standalone
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./source_data:/opt/airflow/source_data
+      - ./dbt_transform:/opt/airflow/dbt_transform
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  dbt:
+    image: dbt-clickhouse:1.11.12
+    container_name: dbt
+    env_file: .env
+    environment:
+      DBT_PROFILES_DIR: /usr/app
+      DBT_PROJECT_DIR: /usr/app
+    working_dir: /usr/app
+    entrypoint: ["tail", "-f", "/dev/null"]
+    volumes:
+      - ./dbt_transform:/usr/app
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  superset:
+    image: apache/superset:4.1.1
+    container_name: superset
+    user: root
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+    command:
+      - bash
+      - -c
+      - |
+        pip install -q clickhouse-connect==0.8.11 &&
+        superset db upgrade &&
+        (superset fab create-admin --username "$${SUPERSET_ADMIN_USER}" --password "$${SUPERSET_ADMIN_PASSWORD}" \
+          --firstname Admin --lastname User --email admin@example.com || true) &&
+        superset init &&
+        /usr/bin/run-server.sh
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+volumes:
+  clickhouse_data:
+  superset_home:
