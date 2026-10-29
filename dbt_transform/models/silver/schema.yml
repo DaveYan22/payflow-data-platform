@@ -1,0 +1,113 @@
+version: 2
+
+models:
+  - name: customers_history
+    description: >
+      SCD2 history of customers built from bronze.raw_customers. One row per real change of the tracked
+      columns (FullName, Email, KycStatus, CountryCode); versions where only updated_at moved are merged.
+      ValidTo is the next version's ValidFrom; the open version has ValidTo 2100-01-01 and IsCurrent = 1.
+    columns:
+      - name: CustomerId
+        data_tests: [not_null]
+      - name: KycStatus
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Verified', 'Pending', 'Rejected']
+      - name: ValidFrom
+        data_tests: [not_null]
+
+  - name: customers_current
+    description: Latest version of every customer (view over customers_history where IsCurrent).
+    columns:
+      - name: CustomerId
+        data_tests: [unique, not_null]
+      - name: CountryCode
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('risk_tiers')
+                field: CountryCode
+
+  - name: accounts_history
+    description: >
+      SCD2 history of accounts built from bronze.raw_accounts. Tracked columns: CustomerId, CurrencyCode,
+      AccountStatus, Balance.
+    columns:
+      - name: AccountId
+        data_tests: [not_null]
+      - name: AccountStatus
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Active', 'Suspended', 'Closed', 'Frozen']
+
+  - name: accounts_current
+    description: Latest version of every account. Sum balances here, never in bronze or the history.
+    columns:
+      - name: AccountId
+        data_tests: [unique, not_null]
+      - name: CustomerId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('customers_current')
+                field: CustomerId
+
+  - name: transactions
+    description: >
+      Latest version of every transaction. Amount is always positive; SignedAmount is positive for money in
+      (Deposit, Transfer In) and negative for everything else (Withdrawal, Card Payment, Transfer, Transfer Out,
+      Fee). MerchantCategory 'N/A' becomes NULL. CreatedDateVilnius is the Europe/Vilnius calendar date.
+    columns:
+      - name: TransactionId
+        data_tests: [unique, not_null]
+      - name: AccountId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('accounts_current')
+                field: AccountId
+      - name: Status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Completed', 'Pending', 'Failed', 'Reversed']
+      - name: TransactionType
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Deposit', 'Withdrawal', 'Card Payment', 'Transfer', 'Transfer In', 'Transfer Out', 'Fee']
+
+  - name: app_events
+    description: App events with event_payload unpacked into columns. The raw JSON is kept as EventPayload.
+    columns:
+      - name: EventId
+        data_tests: [unique, not_null]
+      - name: CustomerId
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('customers_current')
+                field: CustomerId
+
+  - name: fx_rates
+    description: Daily FX rates as units of CurrencyCode per 1 USD, with a USD = 1 row added for every date.
+    columns:
+      - name: CurrencyCode
+        data_tests: [not_null]
+      - name: UnitsPerUsd
+        data_tests: [not_null]
+
+  - name: risk_tiers
+    description: Compliance risk level per ISO-3 country code, from source_data/country_risk_tiers.xlsx.
+    columns:
+      - name: CountryCode
+        data_tests: [unique, not_null]
+      - name: ComplianceRiskLevel
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['low', 'medium', 'high']

@@ -2,25 +2,25 @@ version: 2
 
 sources:
   - name: bronze
-    description: Raw landing tables loaded by the Airflow EL DAGs (append-only).
+    description: Raw landing tables loaded by the Airflow EL DAGs (append-only, never updated).
     schema: bronze
     loaded_at_field: _loaded_at
     tables:
       - name: raw_customers
-        description: Daily full snapshots of MySQL core_banking_prod.raw_customers.
+        description: Incremental by updated_at; a changed customer lands again as a new row.
       - name: raw_accounts
-        description: Daily full snapshots of MySQL core_banking_prod.raw_accounts.
-      - name: raw_fx_rates
-        description: Daily full snapshots of FX rates (units of target_currency per 1 USD).
+        description: Incremental by updated_at; a changed account lands again as a new row.
       - name: raw_transactions
-        description: Incremental by created_at.
+        description: Incremental by updated_at; a status change lands again as a new row.
         freshness:
           warn_after: {count: 2, period: hour}
           error_after: {count: 6, period: hour}
       - name: raw_app_events
-        description: Incremental by created_at; event_payload is a JSON string.
+        description: Incremental by created_at (events never change); event_payload is a JSON string.
         freshness:
           warn_after: {count: 2, period: hour}
           error_after: {count: 6, period: hour}
+      - name: raw_fx_rates
+        description: Replaced on every full load. Units of target_currency per 1 USD; USD itself is not included.
       - name: risk_tiers
-        description: Snapshots of source_data/country_risk_tiers.xlsx.
+        description: Replaced on every full load from source_data/country_risk_tiers.xlsx.
