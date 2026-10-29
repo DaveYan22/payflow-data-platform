@@ -17,9 +17,6 @@ clean-targets:
 
 models:
   dbt_transform:
-    bronze:
-      +schema: bronze
-      +materialized: view
     silver:
       +schema: silver
       +materialized: table
