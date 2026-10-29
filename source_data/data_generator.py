@@ -149,8 +149,8 @@ print("Populating raw_transactions...")
 num_transactions = batch_size("raw_transactions")
 transactions_start = new_rows_start("raw_transactions")
 tx_sql = """
-INSERT INTO raw_transactions (transaction_id, account_id, amount, currency_code, transaction_type, merchant_category, status, created_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+INSERT INTO raw_transactions (transaction_id, account_id, amount, currency_code, transaction_type, merchant_category, status, created_at, updated_at)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 tx_types = ["Deposit", "Withdrawal", "Card Payment", "Transfer"]
 categories = ["Retail", "Dining", "Groceries", "Entertainment", "Utilities", "Travel", "Software"]
@@ -168,7 +168,8 @@ for _ in range(num_transactions):
     status = random.choices(statuses, weights=status_weights)[0]
     created_at = fake.date_time_between(start_date=transactions_start, end_date=now)
 
-    transactions.append((t_id, a_id, amount, curr, t_type, cat, status, created_at))
+    # updated_at = insert time, so new rows are always newer than the incremental watermark
+    transactions.append((t_id, a_id, amount, curr, t_type, cat, status, created_at, now))
 
 cursor.executemany(tx_sql, transactions)
 conn.commit()
