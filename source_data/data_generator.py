@@ -4,18 +4,19 @@ import os
 import random
 import uuid
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
-# Logins live in the project's .env file (never committed)
+# Logins live in the project's .env file (never committed). Inside Airflow they come from the
+# container environment instead, and MYSQL_LOCAL_HOST is overridden to reach the Windows host.
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 fake = Faker()
 
 db_config = {
     "host": os.getenv("MYSQL_LOCAL_HOST", "localhost"),
-    "user": os.environ["MYSQL_ADMIN_USER"],
-    "password": os.environ["MYSQL_ADMIN_PASSWORD"],
+    "user": os.environ["MYSQL_GENERATOR_USER"],
+    "password": os.environ["MYSQL_GENERATOR_PASSWORD"],
     "database": os.environ["MYSQL_DATABASE"],
 }
 
@@ -24,7 +25,8 @@ cursor = conn.cursor()
 
 # The full load is already in MySQL; each run only adds 3-5% of the rows already in a table
 GROWTH_MIN, GROWTH_MAX = 0.03, 0.05
-now = datetime.now().replace(microsecond=0)
+# Always UTC (stored as naive DATETIME), the same on Windows and in the Airflow container
+now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
 
 
 def batch_size(table):
@@ -56,7 +58,7 @@ ON DUPLICATE KEY UPDATE exchange_rate = VALUES(exchange_rate);
 currencies = ["EUR", "GBP", "CAD"]
 base_rates = {"EUR": 0.92, "GBP": 0.79, "CAD": 1.35}
 
-today = datetime.now().date()
+today = now.date()
 fx_records = []
 for day_offset in range(30):
     rate_date = today - timedelta(days=day_offset)

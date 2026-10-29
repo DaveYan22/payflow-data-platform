@@ -56,7 +56,11 @@ Load into ClickHouse now (instead of waiting for the hourly run):
 
 Or in the Airflow UI: open the DAG and press the play button (Trigger DAG).
 
-Schedules: extract_incremental_loads every hour, extract_full_loads daily at 02:00 UTC.
+Schedules: generate_daily_data daily at 01:00 UTC (adds 3-5% to MySQL, then starts the
+incremental load), extract_incremental_loads every hour, extract_full_loads daily at 02:00 UTC.
+
+Run the daily generator by hand from Airflow:
+    docker exec airflow airflow dags trigger generate_daily_data
 
 
 4. CHECK THE DATA IN CLICKHOUSE
