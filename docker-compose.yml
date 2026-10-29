@@ -28,7 +28,7 @@ services:
     environment:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      _PIP_ADDITIONAL_REQUIREMENTS: "clickhouse-connect==0.8.11 mysql-connector-python==9.1.0 openpyxl==3.1.5"
+      _PIP_ADDITIONAL_REQUIREMENTS: "clickhouse-connect==0.8.11 mysql-connector-python==9.1.0 openpyxl==3.1.5 Faker==33.1.0 python-dotenv==1.0.1"
     command:
       - bash
       - -c

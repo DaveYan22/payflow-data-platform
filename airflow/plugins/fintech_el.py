@@ -27,7 +27,7 @@ BRONZE_DDL = {
         client_ip Nullable(String), created_at DateTime('UTC')
     """,
     "raw_fx_rates": """
-        rate_date Date, target_currency LowCardinality(String), exchange_rate Decimal(10, 4)
+        rate_date Date, target_currency LowCardinality(String), exchange_rate Decimal(12, 6)
     """,
     "risk_tiers": """
         country_code String, region String, compliance_risk_level String

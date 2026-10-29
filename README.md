@@ -20,6 +20,7 @@ country_risk_tiers.xlsx ─┘
 | `source_data/data_generator.py` | Adds 3-5% new rows to each MySQL table, dated after the existing ones |
 | `source_data/country_risk_tiers.xlsx` | Manually managed reference data: `country_code`, `region`, `compliance_risk_level` |
 | `airflow/dags/extract_incremental_loads.py` | Hourly watermark loads: customers, accounts (`updated_at`), transactions, app events (`created_at`) |
+| `airflow/dags/generate_daily_data.py` | Daily 01:00 UTC: runs `data_generator.py`, then starts the incremental load |
 | `airflow/dags/extract_full_loads.py` | Daily replace loads: FX rates and risk tiers (no change-tracking column) |
 | `airflow/plugins/fintech_el.py` | Shared MySQL/ClickHouse connections, bronze DDL and chunked copy |
 | `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus seeds/tests/macros |
@@ -35,6 +36,8 @@ copy .env.example .env
 #    CREATE DATABASE core_banking_prod;
 #    CREATE USER 'banking_user'@'%' IDENTIFIED BY '<MYSQL_PASSWORD>';
 #    GRANT SELECT ON core_banking_prod.* TO 'banking_user'@'%';
+#    CREATE USER 'generator_user'@'%' IDENTIFIED BY '<MYSQL_GENERATOR_PASSWORD>';
+#    GRANT SELECT, INSERT, UPDATE ON core_banking_prod.* TO 'generator_user'@'%';
 
 # 3. Start the stack: Airflow http://localhost:8080, Superset http://localhost:8088 (logins from .env)
 docker compose up -d
