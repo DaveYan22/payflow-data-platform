@@ -66,7 +66,9 @@ DDL = [
         merchant_category VARCHAR(100),
         status VARCHAR(50) NOT NULL,
         created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_transactions_created_at (created_at),
+        INDEX idx_transactions_updated_at (updated_at),
         FOREIGN KEY (account_id) REFERENCES raw_accounts (account_id)
     )
     """,

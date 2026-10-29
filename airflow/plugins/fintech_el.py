@@ -20,7 +20,7 @@ BRONZE_DDL = {
     "raw_transactions": """
         transaction_id String, account_id String, amount Decimal(15, 2), currency_code LowCardinality(String),
         transaction_type LowCardinality(String), merchant_category Nullable(String),
-        status LowCardinality(String), created_at DateTime('UTC')
+        status LowCardinality(String), created_at DateTime('UTC'), updated_at DateTime('UTC')
     """,
     "raw_app_events": """
         event_id String, customer_id String, event_type LowCardinality(String), event_payload String,
@@ -85,10 +85,11 @@ def check_source():
     clickhouse_client().command("SELECT 1")
 
 
-def copy_query_to_bronze(table, query, params, batch_id, replace=False):
+def copy_query_to_bronze(table, query, params, batch_id, replace=False, skip_keys=None, key_columns=None):
     """Stream a MySQL query into a bronze table in chunks. Returns the row count.
 
     replace=True empties the bronze table first, for sources without a change-tracking column.
+    skip_keys is a set of key tuples (values of key_columns) already in bronze; matching rows are not inserted.
     """
     client = clickhouse_client()
     ensure_bronze_table(client, table)
@@ -98,14 +99,19 @@ def copy_query_to_bronze(table, query, params, batch_id, replace=False):
     conn = mysql_conn()
     cursor = conn.cursor()
     cursor.execute(query, params)
-    columns = [c[0] for c in cursor.description] + ["_batch_id"]
+    source_columns = [c[0] for c in cursor.description]
+    columns = source_columns + ["_batch_id"]
+    key_positions = [source_columns.index(c) for c in key_columns] if skip_keys else []
 
     total = 0
     while True:
         rows = cursor.fetchmany(CHUNK_SIZE)
         if not rows:
             break
-        client.insert(f"{BRONZE_DB}.{table}", [list(r) + [batch_id] for r in rows], column_names=columns)
+        if skip_keys:
+            rows = [r for r in rows if tuple(r[i] for i in key_positions) not in skip_keys]
+        if rows:
+            client.insert(f"{BRONZE_DB}.{table}", [list(r) + [batch_id] for r in rows], column_names=columns)
         total += len(rows)
 
     cursor.close()
