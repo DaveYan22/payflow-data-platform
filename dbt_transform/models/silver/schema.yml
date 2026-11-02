@@ -54,6 +54,10 @@ models:
               arguments:
                 to: ref('customers_current')
                 field: CustomerId
+      - name: CurrencyCode
+        data_tests: [not_null]
+      - name: Balance
+        data_tests: [not_null]
 
   - name: transactions
     description: >
@@ -80,6 +84,14 @@ models:
           - accepted_values:
               arguments:
                 values: ['Deposit', 'Withdrawal', 'Card Payment', 'Transfer', 'Transfer In', 'Transfer Out', 'Fee']
+      - name: Amount
+        data_tests: [not_null]
+      - name: SignedAmount
+        data_tests: [not_null]
+      - name: CurrencyCode
+        data_tests: [not_null]
+      - name: CreatedAt
+        data_tests: [not_null]
 
   - name: app_events
     description: App events with event_payload unpacked into columns. The raw JSON is kept as EventPayload.

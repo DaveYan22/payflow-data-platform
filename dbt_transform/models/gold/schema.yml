@@ -1,0 +1,86 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: Current customers with their country's risk level and region. Past values are in silver.customers_history.
+    columns:
+      - name: CustomerId
+        data_tests: [unique, not_null]
+      - name: Region
+        data_tests: [not_null]
+      - name: ComplianceRiskLevel
+        data_tests: [not_null]
+
+  - name: dim_accounts
+    description: Current accounts. BalanceUsd uses the latest available rate for the account's currency.
+    columns:
+      - name: AccountId
+        data_tests: [unique, not_null]
+      - name: CustomerId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: CustomerId
+      - name: BalanceUsd
+        data_tests: [not_null]
+
+  - name: fact_transactions
+    description: >
+      One row per transaction, in every status. AmountUsd uses the rate for the transaction's UTC date and stays NULL
+      when no rate exists. IsInCashFlow is true for Completed transactions other than Transfer, which has no direction
+      in the source. NetFlowUsd is signed for rows in cash flow and 0 for the rest.
+    columns:
+      - name: TransactionId
+        data_tests: [unique, not_null]
+      - name: AccountId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounts')
+                field: AccountId
+      - name: CustomerId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: CustomerId
+
+  - name: fact_app_events
+    description: One row per app event.
+    columns:
+      - name: EventId
+        data_tests: [unique, not_null]
+      - name: CustomerId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: CustomerId
+
+  - name: fact_daily_balances
+    description: >
+      One row per account per UTC day, from the account's first transaction or version to today. RunningNetFlowUsd is
+      the running total of cash flow since that first day. ReportedBalance is the source Balance at the end of the day,
+      NULL before the first version. Transactions do not update the source Balance, so the two are not expected to match.
+    columns:
+      - name: AccountId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_accounts')
+                field: AccountId
+      - name: CustomerId
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: CustomerId
+      - name: BalanceDate
+        data_tests: [not_null]
