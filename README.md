@@ -53,7 +53,7 @@ python source_data/data_generator.py
 
 # 6. In Airflow, unpause and trigger extract_incremental_loads and extract_full_loads
 
-# 7. Run dbt against ClickHouse (inside the dbt container)
+# 7. Run dbt against ClickHouse (inside the dbt container). extract_incremental_loads also runs dbt build after each load
 docker compose exec dbt dbt debug
 docker compose exec dbt dbt build
 ```

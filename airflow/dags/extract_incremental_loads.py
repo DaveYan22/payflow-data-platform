@@ -5,8 +5,10 @@ the watermark minus a short lookback are pulled, so rows committed late (with a
 timestamp just before the watermark) are not missed. Rows from the lookback window
 that bronze already has are skipped, so reruns never duplicate rows.
 Customers, accounts and transactions use updated_at, so a changed row lands again
-as a new version.
+as a new version. After every table has loaded, dbt build refreshes and tests silver.
 """
+import os
+import subprocess
 from datetime import datetime, timedelta
 
 import pendulum
@@ -23,6 +25,8 @@ INCREMENTAL_TABLES = {
 }
 LOOKBACK = timedelta(minutes=10)
 EPOCH = datetime(1970, 1, 1)
+# dbt has its own venv (see docker-compose.yml) so its packages cannot clash with Airflow's
+DBT_BIN = "/home/airflow/dbt_venv/bin/dbt"
 
 
 @dag(
@@ -68,7 +72,28 @@ def extract_incremental_loads():
         print(f"{table}: loaded {rows} rows with {column} newer than {since} (watermark {watermark})")
         return rows
 
-    check_source_task() >> load_delta.expand(table=list(INCREMENTAL_TABLES))
+    # A failed model or test will not fix itself on retry; the next hourly run builds again
+    @task(retries=0)
+    def dbt_build():
+        project_dir = os.environ["DBT_PROJECT_DIR"]
+        result = subprocess.run(
+            [
+                DBT_BIN, "build",
+                "--project-dir", project_dir,
+                "--profiles-dir", project_dir,
+                # The dbt container owns target/ and logs/ in the shared project folder
+                "--target-path", "/tmp/dbt_target",
+                "--log-path", "/tmp/dbt_logs",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        print(result.stdout)
+        if result.returncode != 0:
+            print(result.stderr)
+            raise RuntimeError(f"dbt build failed with exit code {result.returncode}")
+
+    check_source_task() >> load_delta.expand(table=list(INCREMENTAL_TABLES)) >> dbt_build()
 
 
 extract_incremental_loads()
