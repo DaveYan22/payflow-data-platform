@@ -47,13 +47,13 @@ def new_rows_start(table, column="created_at"):
 print("Starting realistic data generation...")
 
 # ---------------------------------------------------------
-# 1. GENERATE FX RATES (~90 rows: 30 days x 3 currencies)
+# 1. GENERATE FX RATES (fills missing dates in the last 30 days; existing rates are never changed)
 # ---------------------------------------------------------
 print("Populating raw_fx_rates...")
 fx_sql = """
 INSERT INTO raw_fx_rates (rate_date, target_currency, exchange_rate)
 VALUES (%s, %s, %s)
-ON DUPLICATE KEY UPDATE exchange_rate = VALUES(exchange_rate);
+ON DUPLICATE KEY UPDATE exchange_rate = exchange_rate;
 """
 currencies = ["EUR", "GBP", "CAD"]
 base_rates = {"EUR": 0.92, "GBP": 0.79, "CAD": 1.35}
@@ -212,7 +212,7 @@ cursor.close()
 conn.close()
 
 print("Mock data generation finished successfully:")
-print(f" - raw_fx_rates:     {len(fx_records)} rows")
+print(f" - raw_fx_rates:     {len(fx_records)} dates x currencies checked, existing rates kept")
 print(f" - raw_customers:    {len(customers)} rows")
 print(f" - raw_accounts:     {len(accounts)} rows")
 print(f" - raw_transactions: {len(transactions)} rows")
