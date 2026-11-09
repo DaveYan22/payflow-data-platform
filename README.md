@@ -16,7 +16,7 @@ The **PayFlow Overview** dashboard in Superset covers transaction volume, net ca
 See a snapshot: [docs/dashboard/payflow-overview.pdf](docs/dashboard/payflow-overview.pdf).
 
 Full project documentation, including design decisions and the issues met along the way, is in
-[docs/project_documentation.md](docs/project_documentation.md).
+[docs/payflow_course.md](docs/payflow_course.md), a step-by-step course from setup to dashboard.
 
 ## Layout
 
@@ -34,7 +34,6 @@ Full project documentation, including design decisions and the issues met along 
 | `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus `tests/` and `macros/` |
 | `superset/build_dashboard.py` | Builds or updates the PayFlow Overview dashboard through the Superset API |
 | `docs/` | Project documentation and a PDF snapshot of the dashboard |
-| `commands for docker images.txt` | Day-to-day commands: start/stop, links, loading, checks |
 
 ## Quick start
 
