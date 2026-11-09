@@ -996,7 +996,7 @@ This project builds SCD2 **from bronze** instead:
 | Can it be rebuilt? | No: a dropped snapshot loses its history | Yes: rerun dbt, history comes back from bronze |
 | Missed run | Changes in between are lost | Nothing lost, bronze has every loaded version |
 
-The `snapshots/` folder exists in the project but is empty.
+The project has no `snapshots/` folder: no dbt snapshots are used.
 
 ### Dashboard snapshot
 

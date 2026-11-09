@@ -16,6 +16,7 @@ airflow/logs/*
 dbt_transform/target/
 dbt_transform/dbt_packages/
 dbt_transform/logs/
+dbt_transform/.user.yml
 
 # Editors / OS
 .vscode/
