@@ -31,7 +31,7 @@ Full project documentation, including design decisions and the issues met along 
 | `airflow/dags/generate_daily_data.py` | Daily 01:00 UTC: runs `data_generator.py`, then starts the incremental load |
 | `airflow/dags/extract_full_loads.py` | Daily replace loads: FX rates and risk tiers (no change-tracking column) |
 | `airflow/plugins/fintech_el.py` | Shared MySQL/ClickHouse connections, bronze DDL and chunked copy |
-| `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus seeds/tests/macros |
+| `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus `tests/` and `macros/` |
 | `superset/build_dashboard.py` | Builds or updates the PayFlow Overview dashboard through the Superset API |
 | `docs/` | Project documentation and a PDF snapshot of the dashboard |
 | `commands for docker images.txt` | Day-to-day commands: start/stop, links, loading, checks |
