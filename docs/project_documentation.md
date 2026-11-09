@@ -13,7 +13,7 @@ The pipeline runs end to end from MySQL to gold, and every transaction converts 
 | Transactions missing an FX rate | 0 of 2,435, down from 1,273 |
 | FX rates in MySQL and bronze | 204 rows, 27 Aug to 2 Nov |
 | Gold layer | Built on `feature/gold-layer`, not merged yet |
-| Superset dashboards | Not started |
+| Superset dashboard | PayFlow Overview, 11 charts, built by `superset/build_dashboard.py` |
 
 ## Architecture
 
@@ -169,6 +169,34 @@ Excel (risk tiers) -------+                            v
 | Risk profiles | `dim_customers`, joined to the facts |
 | FX converter | `silver.fx_rates`, as it is a reference lookup rather than part of a star |
 
+The **PayFlow Overview** dashboard (http://localhost:8088/superset/dashboard/payflow-overview/) has 5 sections and 11 charts. A snapshot from 9 Nov 2026 (Date range: Last month, Transaction currency: USD) is in [dashboard/payflow-overview.pdf](dashboard/payflow-overview.pdf).
+
+| Section | Charts | Dataset |
+|---|---|---|
+| Overview | Completed volume, net cash flow, completed transactions, customers | `fact_transactions`, `customer_profile` |
+| Transaction volume | Daily volume by type | `fact_transactions` |
+| Net cash flow | Daily net cash flow, cumulative net cash flow | `fact_transactions` |
+| Risk profiles | Customers by risk level; customers, balance and failed PIN attempts by region | `customer_profile` |
+| FX converter | Latest rates both ways; rates over time | `fx_latest`, `silver.fx_rates` |
+
+`customer_profile` and `fx_latest` are SQL datasets defined in the script. The dashboard has three filters:
+
+| Filter | Applies to | How it works |
+|---|---|---|
+| Date range | All time charts | Defaults to Last month |
+| Transaction currency | Overview KPIs (except Customers), volume and cash flow charts | One currency at a time, default USD. Amounts show in that currency, so different currencies are never added together |
+| FX currency | FX converter charts | Pick one or more currencies |
+
+Balances in the risk table stay in USD.
+
+To rebuild it from scratch, set `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD` from `.env` in your shell, then run:
+
+```
+Get-Content superset/build_dashboard.py | docker exec -i -e CLICKHOUSE_USER -e CLICKHOUSE_PASSWORD superset python -
+```
+
+The script reuses the database connection and datasets. If the dashboard exists, it updates the charts and filters in place and keeps the layout and the Date range default; otherwise it creates the dashboard.
+
 ## Tests
 
 All 69 tests run as part of `dbt build`. Custom SQL tests are in `dbt_transform/tests/<layer>/`, and column tests are in each layer's `schema.yml`.
@@ -185,8 +213,7 @@ The FX coverage and USD tests ignore today's rows, because today's rate arrives 
 
 **Next:**
 
-- [ ] Push `feature/gold-layer`, open a PR and merge it
-- [ ] Build the Superset dashboards
+- [ ] Add a true amount-input FX converter, if needed (Superset has no free-number input by default)
 
 **Clean-up:**
 

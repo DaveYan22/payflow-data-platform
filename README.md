@@ -10,6 +10,14 @@ MySQL core_banking_prod ─┐
 country_risk_tiers.xlsx ─┘
 ```
 
+## Dashboard
+
+The **PayFlow Overview** dashboard in Superset covers transaction volume, net cash flow, risk profiles and FX rates.
+See a snapshot: [docs/dashboard/payflow-overview.pdf](docs/dashboard/payflow-overview.pdf).
+
+Full project documentation, including design decisions and the issues met along the way, is in
+[docs/project_documentation.md](docs/project_documentation.md).
+
 ## Layout
 
 | Path | Purpose |
@@ -24,6 +32,8 @@ country_risk_tiers.xlsx ─┘
 | `airflow/dags/extract_full_loads.py` | Daily replace loads: FX rates and risk tiers (no change-tracking column) |
 | `airflow/plugins/fintech_el.py` | Shared MySQL/ClickHouse connections, bronze DDL and chunked copy |
 | `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus seeds/tests/macros |
+| `superset/build_dashboard.py` | Builds or updates the PayFlow Overview dashboard through the Superset API |
+| `docs/` | Project documentation and a PDF snapshot of the dashboard |
 | `commands for docker images.txt` | Day-to-day commands: start/stop, links, loading, checks |
 
 ## Quick start
