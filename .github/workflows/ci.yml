@@ -39,6 +39,8 @@ jobs:
           pip install "apache-airflow==2.10.3" \
             --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt"
           pip install clickhouse-connect==0.8.11 mysql-connector-python==9.1.0 openpyxl==3.1.5 Faker==33.1.0 python-dotenv==1.0.1
+          # Preinstalled in the apache/airflow image, but not part of a plain pip install
+          pip install pandas==2.1.4
       - name: Load every DAG
         env:
           AIRFLOW_HOME: ${{ runner.temp }}/airflow

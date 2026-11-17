@@ -23,8 +23,8 @@ if missing:
     print(f"MISSING DAGS: {sorted(missing)}")
     failed = True
 
-for dag_id in sorted(dag_bag.dag_ids):
-    dag = dag_bag.get_dag(dag_id)
+# dag_bag.dags, not get_dag(): get_dag() also queries the metadata database, which CI does not have
+for dag_id, dag in sorted(dag_bag.dags.items()):
     if not dag.tasks:
         print(f"DAG {dag_id} has no tasks")
         failed = True
