@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python-syntax:
+    name: Python syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile every Python file
+        run: python -m compileall -q airflow source_data mock_data superset ci
+
+  airflow-dags:
+    name: Airflow DAG import
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Airflow and the DAG dependencies (same versions as docker-compose.yml)
+        run: |
+          pip install "apache-airflow==2.10.3" \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt"
+          pip install clickhouse-connect==0.8.11 mysql-connector-python==9.1.0 openpyxl==3.1.5 Faker==33.1.0 python-dotenv==1.0.1
+          # Preinstalled in the apache/airflow image, but not part of a plain pip install
+          pip install pandas==2.1.4
+      - name: Load every DAG
+        env:
+          AIRFLOW_HOME: ${{ runner.temp }}/airflow
+          AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+          PYTHONPATH: airflow/plugins
+        run: python ci/check_dag_imports.py airflow/dags
+
+  dbt-parse:
+    name: dbt parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dbt (same versions as the Airflow dbt venv)
+        run: pip install dbt-core==1.11.12 dbt-clickhouse==1.10.1
+      - name: Parse the project (no database connection)
+        env:
+          CLICKHOUSE_USER: ci
+          CLICKHOUSE_PASSWORD: ci
+        run: |
+          dbt parse --project-dir dbt_transform --profiles-dir dbt_transform
+          dbt ls --project-dir dbt_transform --profiles-dir dbt_transform --resource-type model --resource-type test --output name --quiet | wc -l
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: .env must never be committed
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo ".env is tracked by git: remove it with 'git rm --cached .env'"
+            exit 1
+          fi
+      - name: Scan the full git history with gitleaks
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 git /repo --redact --verbose
