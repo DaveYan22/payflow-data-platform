@@ -441,7 +441,7 @@ on bronze.
   - `app_events`, with the JSON unpacked
   - `fx_rates`, with USD = 1 added
   - `risk_tiers`
-- Added 38 tests: allowed values, links between tables, valid SCD2 ranges, FX coverage, and every bronze ID reaching
+- Added 39 tests: allowed values, links between tables, valid SCD2 ranges, only real changes kept as versions, FX coverage, and every bronze ID reaching
   silver.
 - Fixed the FX gap: 1,273 transactions had no rate.
 - Covered in Modules 6, 7 and 11.
@@ -1141,22 +1141,22 @@ Gold totals were checked against an independent calculation from silver:
 | Generic (column) tests | `schema.yml` next to the models | `unique`, `not_null`, `accepted_values`, `relationships` |
 | Singular (custom SQL) tests | `tests/<layer>/*.sql` | Any query; the test fails if it returns rows |
 
-### Tests by layer: 69 in total
+### Tests by layer: 70 in total
 
 | Layer | Tests | Custom SQL tests in `tests/<layer>/` |
 |---|---|---|
 | Bronze | 1 | `assert_fx_rates_loaded_recently` (warning only) |
-| Silver | 38 | `assert_one_current_version_per_entity`, `assert_scd2_ranges_are_valid`, `assert_fx_rate_exists_for_transactions`, `assert_fx_rates_unique_per_date_and_currency`, `assert_transaction_currency_matches_account`, `assert_bronze_ids_reach_silver` |
+| Silver | 39 | `assert_one_current_version_per_entity`, `assert_scd2_ranges_are_valid`, `assert_scd2_versions_are_real_changes`, `assert_fx_rate_exists_for_transactions`, `assert_fx_rates_unique_per_date_and_currency`, `assert_transaction_currency_matches_account`, `assert_bronze_ids_reach_silver` |
 | Gold | 30 | `assert_fact_row_counts_match_silver`, `assert_usd_values_present`, `assert_cash_flow_rules`, `assert_daily_balances_unique_per_account_and_date`, `assert_daily_net_flow_matches_transactions`, `assert_running_net_flow_is_cumulative` |
 
-A full `dbt build` runs 82 nodes (13 models and 69 tests).
+A full `dbt build` runs 83 nodes (13 models and 70 tests).
 
 ### What each layer tests
 
 | Layer | Risk | Tests |
 |---|---|---|
 | Bronze | Source stopped loading | FX rates loaded in the last 26 hours |
-| Silver | Bad values, broken links, broken SCD2 | Allowed values for statuses and types; links between customers, accounts and transactions; one current version; valid date ranges; every bronze ID reaches silver |
+| Silver | Bad values, broken links, broken SCD2 | Allowed values for statuses and types; links between customers, accounts and transactions; one current version; valid date ranges; no two consecutive versions with the same values; every bronze ID reaches silver |
 | Silver | FX gaps | Every transaction has a rate for its date; one rate per date and currency |
 | Gold | Joins multiply or drop rows | Row counts match silver; unique keys |
 | Gold | Broken conversion or rules | USD values present; Transfer and non-completed never in cash flow |
@@ -1665,7 +1665,7 @@ means the workflow can only read the repository.
 | **Python syntax** | `python -m compileall` on `airflow/`, `source_data/`, `mock_data/`, `superset/`, `ci/` | A file Python cannot even read | A missing `)` in a DAG |
 | **Airflow DAG import** | Installs Airflow 2.10.3 with the same packages as `docker-compose.yml`, then loads every DAG like the scheduler does (`ci/check_dag_imports.py`) | DAGs that would show as "Broken DAG" and stop running | A wrong import, a missing package, a dependency loop, a deleted DAG |
 | **dbt parse** | Installs dbt 1.11.12 and dbt-clickhouse 1.10.1, then runs `dbt parse` and counts models and tests | A dbt project that would fail the hourly `dbt build` | `ref('fx_rate')` instead of `ref('fx_rates')`, bad YAML in `schema.yml`, a broken Jinja tag |
-| **dbt build on ClickHouse** | Starts a temporary ClickHouse 25.8, creates bronze with the Airflow DDL, loads sample data (`ci/seed_bronze.py`), runs `dbt build` | SQL ClickHouse rejects, and broken business rules: all 13 models and 69 tests run on real data | The alias clash that broke `fact_daily_balances`; Transfer counted in cash flow |
+| **dbt build on ClickHouse** | Starts a temporary ClickHouse 25.8, creates bronze with the Airflow DDL, loads sample data (`ci/seed_bronze.py`), runs `dbt build` | SQL ClickHouse rejects, and broken business rules: all 13 models and 70 tests run on real data | The alias clash that broke `fact_daily_balances`; Transfer counted in cash flow |
 | **Secret scan** | Fails if `.env` is tracked, then scans the **whole git history** with gitleaks | Passwords, keys and tokens committed by mistake | A committed `.env`, a hardcoded password, an API key |
 
 ### How the DAG check works
@@ -1693,7 +1693,7 @@ load them with no database and no `.env`.
 
 `dbt parse` reads every model, test, macro and YAML file and builds the project's lineage, but never connects to
 ClickHouse. `profiles.yml` still needs `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD` to be set, so the workflow sets
-them to the dummy value `ci`. The check confirms the project still has 82 models and tests (13 models, 69 tests).
+them to the dummy value `ci`. The check confirms the project still has 83 models and tests (13 models, 70 tests).
 
 What it does **not** catch is SQL that is valid Jinja but wrong for ClickHouse, or a broken business rule. That
 needs a real `dbt build`, which the next job does.
@@ -1776,7 +1776,7 @@ GitHub Actions job
   |-- service container: clickhouse/clickhouse-server:25.8 (user ci, port 8123, health check /ping)
   |-- pip install dbt-core 1.11.12, dbt-clickhouse 1.10.1, mysql-connector-python 9.1.0
   |-- python ci/seed_bronze.py     creates bronze with the Airflow DDL, loads sample rows
-  `-- dbt build                    13 models + 69 tests = 82 nodes
+  `-- dbt build                    13 models + 70 tests = 83 nodes
 ```
 
 **Bronze is created with the real DDL.** `ci/seed_bronze.py` calls `ensure_bronze_table()` from
@@ -1819,9 +1819,12 @@ wrong rule.
 **Maintenance:** when a new model or test needs a new kind of row (a new transaction type, a new status), add it to
 `ci/seed_bronze.py` in the same pull request.
 
-**Known gap:** no test checks that versions with no real change are merged in SCD2. The sample has such a case
-(`cust_ci_0002`), but if the merge broke, the extra version would still have valid ranges and pass every test. A
-test comparing the number of versions to the number of real changes would close it.
+**A gap found, and closed:** while designing the sample, it turned out no test checked that versions with no real
+change are merged in SCD2. If the merge broke, the extra version would still have valid ranges and pass every test.
+`tests/silver/assert_scd2_versions_are_real_changes.sql` closes it: it compares each version with the previous one
+(`lagInFrame` over the tracked columns, as the model does) and fails if two in a row are identical. Tested in CI
+conditions: it passes on the intact project (83/83), and when the merge is broken on purpose (`OR 1 = 1` in place of
+the change filter) it is the only test that fails.
 
 ### Key takeaways
 
