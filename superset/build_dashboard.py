@@ -117,7 +117,10 @@ def ensure_database(s):
     call(s, "POST", "database/test_connection/", json={"database_name": DATABASE_NAME, "sqlalchemy_uri": uri})
     existing = find(s, "database", "database_name", DATABASE_NAME)
     if existing:
-        return existing[0]["id"]
+        # Update the stored login too, so a ClickHouse password change in .env reaches Superset
+        database_id = existing[0]["id"]
+        call(s, "PUT", f"database/{database_id}", json={"sqlalchemy_uri": uri})
+        return database_id
     return call(s, "POST", "database/", json={
         "database_name": DATABASE_NAME,
         "sqlalchemy_uri": uri,
