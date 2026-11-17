@@ -1441,7 +1441,8 @@ Every change went on a feature branch, branched from the latest `origin/main`, m
 | #6 | `feature/superset-dashboard` | Dashboard build script, PDF snapshot |
 | #7 | `docs/payflow-course` | This course |
 | #8 | `chore/remove-unused-files` | Removed unused files and the documents this course replaced |
-| next | `ci/github-actions` | CI checks on every pull request (Module 17) |
+| #9 | `ci/github-actions` | CI level 1: syntax, DAG import, `dbt parse`, secret scan (Module 17) |
+| next | `ci/dbt-build` | CI level 2: full `dbt build` on ClickHouse with sample data (Module 17) |
 
 After merging, branches were deleted locally (`git branch -d`, which refuses unmerged work) and on GitHub, after
 checking each was an ancestor of `origin/main`.
@@ -1610,7 +1611,7 @@ ORDER BY
 - [ ] Decide whether to trim about 10 redundant gold tests.
 - [ ] Switch `app_events`, then `transactions`, to incremental when builds slow down.
 - [x] CI level 1: syntax, DAG import, `dbt parse` and secret scan on every pull request (Module 17).
-- [ ] CI level 2: full `dbt build` against a temporary ClickHouse with sample data.
+- [x] CI level 2: full `dbt build` against a temporary ClickHouse with sample data (Module 17).
 - [ ] Start Docker Desktop on sign-in and give the containers `restart: unless-stopped`, so the daily DAGs run
   without a manual start.
 - [ ] README screenshots.
@@ -1629,7 +1630,7 @@ ORDER BY
 
 | Term | Meaning | In this project |
 |---|---|---|
-| **CI** (continuous integration) | Every change is checked automatically before it is merged | ✅ GitHub Actions runs 4 checks on every pull request |
+| **CI** (continuous integration) | Every change is checked automatically before it is merged | ✅ GitHub Actions runs 5 checks on every pull request |
 | **CD** (continuous delivery or deployment) | Every merged change is released automatically | Not needed: the stack runs on a laptop, see below |
 
 ### What runs, and when
@@ -1640,7 +1641,7 @@ The workflow is `.github/workflows/ci.yml`. It runs:
 - on every push to `main`, after a merge
 - by hand, from **Actions → CI → Run workflow**
 
-Each check is a separate job on a fresh Ubuntu machine. All 4 run in parallel, and each shows as its own line on the
+Each check is a separate job on a fresh Ubuntu machine. All 5 run in parallel, and each shows as its own line on the
 pull request.
 
 ```text
@@ -1648,6 +1649,7 @@ push branch --> open PR --> GitHub Actions
                               |-- Python syntax        (~20 s)
                               |-- Airflow DAG import   (~1-2 min)
                               |-- dbt parse            (~40 s)
+                              |-- dbt build on ClickHouse (~2-3 min)
                               |-- Secret scan          (~20 s)
                               v
                     all green ✅ --> merge     any red ❌ --> open the log, fix, push again
@@ -1656,13 +1658,14 @@ push branch --> open PR --> GitHub Actions
 `concurrency` cancels an older run when a new commit is pushed to the same branch, and `permissions: contents: read`
 means the workflow can only read the repository.
 
-### The four checks
+### The five checks
 
 | Job | What it does | What it catches | Example |
 |---|---|---|---|
 | **Python syntax** | `python -m compileall` on `airflow/`, `source_data/`, `mock_data/`, `superset/`, `ci/` | A file Python cannot even read | A missing `)` in a DAG |
 | **Airflow DAG import** | Installs Airflow 2.10.3 with the same packages as `docker-compose.yml`, then loads every DAG like the scheduler does (`ci/check_dag_imports.py`) | DAGs that would show as "Broken DAG" and stop running | A wrong import, a missing package, a dependency loop, a deleted DAG |
 | **dbt parse** | Installs dbt 1.11.12 and dbt-clickhouse 1.10.1, then runs `dbt parse` and counts models and tests | A dbt project that would fail the hourly `dbt build` | `ref('fx_rate')` instead of `ref('fx_rates')`, bad YAML in `schema.yml`, a broken Jinja tag |
+| **dbt build on ClickHouse** | Starts a temporary ClickHouse 25.8, creates bronze with the Airflow DDL, loads sample data (`ci/seed_bronze.py`), runs `dbt build` | SQL ClickHouse rejects, and broken business rules: all 13 models and 69 tests run on real data | The alias clash that broke `fact_daily_balances`; Transfer counted in cash flow |
 | **Secret scan** | Fails if `.env` is tracked, then scans the **whole git history** with gitleaks | Passwords, keys and tokens committed by mistake | A committed `.env`, a hardcoded password, an API key |
 
 ### How the DAG check works
@@ -1693,7 +1696,7 @@ ClickHouse. `profiles.yml` still needs `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWOR
 them to the dummy value `ci`. The check confirms the project still has 82 models and tests (13 models, 69 tests).
 
 What it does **not** catch is SQL that is valid Jinja but wrong for ClickHouse, or a broken business rule. That
-needs a real `dbt build`, which is CI level 2.
+needs a real `dbt build`, which the next job does.
 
 ### How it was tested before the first push
 
@@ -1725,6 +1728,8 @@ environment the code normally runs in.
 2. Open the red step. The error is usually in its last lines:
    - **DAG import:** `IMPORT ERROR in <file>` followed by the Python traceback.
    - **dbt parse:** the model or YAML file and the line.
+   - **dbt build:** the `ERROR` line (SQL rejected) or `FAIL` line (a test returned rows), then
+     `Failure in test ...` with the test file.
    - **Secret scan:** the file, the commit and the rule that matched, with the value redacted.
 3. Fix it on the same branch and push. CI runs again by itself.
 
@@ -1733,14 +1738,15 @@ password first**, then decide whether to rewrite the history.
 
 ### Making CI required
 
-In the `main` branch ruleset, under **Require status checks to pass**, add the 4 checks:
+In the `main` branch ruleset, under **Require status checks to pass**, add the 5 checks:
 
 - `Python syntax`
 - `Airflow DAG import`
 - `dbt parse`
+- `dbt build on ClickHouse`
 - `Secret scan`
 
-From then on, GitHub disables the merge button until all 4 are green. The checks only appear in the list after the
+From then on, GitHub disables the merge button until all 5 are green. The checks only appear in the list after the
 workflow has run once.
 
 ### CD: why there is none, and what it would look like
@@ -1761,21 +1767,68 @@ On a real server, CD would be another workflow, triggered by a merge to `main`:
 3. Deploy to the server, for example over SSH with `docker compose pull && docker compose up -d`, or to Kubernetes.
 4. Run a smoke test, such as `dbt test` or triggering a DAG, and roll back to the previous tag if it fails.
 
-### CI level 2: full dbt build (next step)
+### CI level 2: full dbt build on ClickHouse
 
-The next step would run every model and test in CI:
+The `dbt build on ClickHouse` job runs every model and test against a real, temporary warehouse:
 
-1. Start ClickHouse 25.8 as a service container in the job.
-2. Create the bronze tables and load a small, fixed sample data set, committed to the repo, that passes all 69 tests.
-3. Run `dbt build`.
+```text
+GitHub Actions job
+  |-- service container: clickhouse/clickhouse-server:25.8 (user ci, port 8123, health check /ping)
+  |-- pip install dbt-core 1.11.12, dbt-clickhouse 1.10.1, mysql-connector-python 9.1.0
+  |-- python ci/seed_bronze.py     creates bronze with the Airflow DDL, loads sample rows
+  `-- dbt build                    13 models + 69 tests = 82 nodes
+```
 
-This catches ClickHouse SQL errors and broken business rules before merging, at the cost of keeping the sample data
-up to date as the models change.
+**Bronze is created with the real DDL.** `ci/seed_bronze.py` calls `ensure_bronze_table()` from
+`airflow/plugins/fintech_el.py`, the same function the DAGs use. A column type changed for Airflow is changed for CI
+automatically. (It imports `mysql.connector` only because `fintech_el.py` does; it never connects to MySQL.)
+
+**Dates are relative to today.** Daily balances run up to `today()`, and the FX freshness test looks at the last 26
+hours, so a fixed data file would start failing as time passes. The script computes every date from the day it runs.
+
+**Every row has a purpose.** The sample is small (8 customer rows, 5 account rows, 12 transaction rows, 5 events, 120
+FX rates, 8 risk tiers), but each rule has a row that would break it:
+
+| Sample rows | Rule they exercise |
+|---|---|
+| `cust_ci_0001` loaded twice with the same `updated_at` | Silver keeps one copy of a version |
+| `cust_ci_0002`: Verified/NLD → Pending/NLD → only `updated_at` changes → Pending/DEU | SCD2 gives 3 versions; the no-change version is merged |
+| `cust_ci_0003` with `" Chloe@Example.com "`, `pending`, `gbr` | Trimming and case cleaning |
+| `acc_ci_0001`: Active 1000 → Suspended 800 | SCD2 on accounts, one current version |
+| `acc_ci_0003` with a transaction 2 days before its first version | `ReportedBalance` is NULL before the first version |
+| `tx_ci_0003`: Pending, then Completed | Silver keeps the latest state of a transaction |
+| `tx_ci_0004` Transfer, `tx_ci_0005` Failed, `tx_ci_0006` Pending | None of them in cash flow, `NetFlowUsd = 0` |
+| `tx_ci_0008` with an empty merchant category, `tx_ci_0009` with `card_payment` | NULL merchant category, type cleaning |
+| `tx_ci_0011` created now, no FX rate for today | Tests that ignore today's rows |
+| `evt_ci_0001` loaded twice, `evt_ci_0004` with `{"device": ""}` | Event dedupe, missing JSON fields become NULL |
+| FX rates for 40 days up to yesterday, 8 risk tiers covering every country | Every transaction converts; every customer gets a region |
+
+**How it was tested:** in a clean `python:3.11-slim` container against a fresh ClickHouse 25.8, as on GitHub:
+
+| Test | Result |
+|---|---|
+| Unchanged project | `PASS=82`: all models and tests pass |
+| SCD2, cleaning and cash-flow results checked by query | All as designed: 3 versions for `cust_ci_0002`, Transfer/Failed/Pending out of cash flow |
+| `fact_transactions` edited into SQL ClickHouse rejects | Model `ERROR`, 18 downstream nodes skipped, build fails |
+| Transfer rule broken with valid SQL (`!= 'Fee'` instead of `!= 'Transfer'`) | `assert_cash_flow_rules` `FAIL 1` on `tx_ci_0004`, build fails |
+
+The last test matters most. The first broken version produced invalid SQL, which proved CI catches SQL errors but
+said nothing about business rules. Only a change that keeps the SQL valid shows that the **data tests** catch a
+wrong rule.
+
+**Maintenance:** when a new model or test needs a new kind of row (a new transaction type, a new status), add it to
+`ci/seed_bronze.py` in the same pull request.
+
+**Known gap:** no test checks that versions with no real change are merged in SCD2. The sample has such a case
+(`cust_ci_0002`), but if the merge broke, the extra version would still have valid ranges and pass every test. A
+test comparing the number of versions to the number of real changes would close it.
 
 ### Key takeaways
 
 - CI checks every change the same way, before it reaches the running pipeline.
 - Cheap checks (syntax, imports, parse, secrets) catch most mistakes in under 2 minutes, with no data or passwords.
+- Only a real build on real data catches wrong SQL and broken business rules; sample data must be designed so that
+  each rule has a row that would break it.
 - Test a CI check locally, including making it fail on purpose, before trusting it.
 - CD only pays off when there is somewhere to deploy to.
 

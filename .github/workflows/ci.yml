@@ -66,6 +66,43 @@ jobs:
           dbt parse --project-dir dbt_transform --profiles-dir dbt_transform
           dbt ls --project-dir dbt_transform --profiles-dir dbt_transform --resource-type model --resource-type test --output name --quiet | wc -l
 
+  dbt-build:
+    name: dbt build on ClickHouse
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_USER: ci
+          CLICKHOUSE_PASSWORD: ci
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping"
+          --health-interval 5s
+          --health-retries 20
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_HTTP_PORT: "8123"
+      CLICKHOUSE_USER: ci
+      CLICKHOUSE_PASSWORD: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dbt and the bronze loader dependencies
+        run: |
+          pip install dbt-core==1.11.12 dbt-clickhouse==1.10.1
+          pip install mysql-connector-python==9.1.0
+      - name: Create bronze with the Airflow DDL and load sample data
+        env:
+          PYTHONPATH: airflow/plugins
+        run: python ci/seed_bronze.py
+      - name: Build every model and run every test
+        run: dbt build --project-dir dbt_transform --profiles-dir dbt_transform
+
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
