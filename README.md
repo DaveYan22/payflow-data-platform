@@ -36,8 +36,8 @@ Full project documentation, including design decisions and the issues met along 
 | `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus `tests/` and `macros/` |
 | `superset/build_dashboard.py` | Builds or updates the PayFlow Overview dashboard through the Superset API |
 | `docs/` | Project documentation and a PDF snapshot of the dashboard |
-| `.github/workflows/ci.yml` | CI on every pull request: Python syntax, Airflow DAG import, `dbt parse`, secret scan |
-| `ci/` | Scripts used by CI |
+| `.github/workflows/ci.yml` | CI on every pull request: Python syntax, Airflow DAG import, `dbt parse`, full `dbt build` on a temporary ClickHouse, secret scan |
+| `ci/` | CI scripts: DAG import check, bronze sample data for the `dbt build` job |
 
 ## Quick start
 
