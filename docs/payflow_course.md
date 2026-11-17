@@ -122,22 +122,44 @@ Extra Python packages are installed on each start:
 _PIP_ADDITIONAL_REQUIREMENTS: "clickhouse-connect==0.8.11 mysql-connector-python==9.1.0 openpyxl==3.1.5 Faker==33.1.0 python-dotenv==1.0.1"
 ```
 
-Its startup command also installs dbt in a separate virtual environment, only if it is missing (Module 10):
+Its startup command runs these steps on every start:
 
 ```bash
+rm -f /opt/airflow/*.pid &&                                       # 1. clear stale PID files
 ([ -x /home/airflow/dbt_venv/bin/dbt ] || (python -m venv /home/airflow/dbt_venv &&
-  /home/airflow/dbt_venv/bin/pip install -q dbt-core==1.11.12 dbt-clickhouse==1.10.1)) &&
-airflow db migrate && ... && airflow standalone
+  /home/airflow/dbt_venv/bin/pip install -q dbt-core==1.11.12 dbt-clickhouse==1.10.1)) &&   # 2. dbt venv (Module 10)
+airflow db migrate &&                                             # 3. metadata database
+(airflow users create ... || true) &&                             # 4. admin user, first start only
+airflow users reset-password --username ... --password ... &&     # 5. admin password from .env
+airflow standalone
 ```
 
-Project folders are mounted into Airflow, so code changes are live immediately:
+1. **PID files:** after a restart, a PID file left from the last run can point at another process, and the web server
+   refuses to start (issue 12 in Module 14).
+2. **dbt venv:** installed only if missing.
+3. **Metadata database:** created or upgraded.
+4. **Admin user:** created on the first start only.
+5. **Admin password:** reset from `.env` on every start, so `.env` is the single source of truth. Superset does the
+   same with `superset fab reset-password`.
+
+Project folders are mounted into Airflow, so code changes are live immediately. Airflow's own data lives in a named
+volume:
 
 | Host folder | Container path |
 |---|---|
+| volume `airflow_home` | `/opt/airflow`: SQLite metadata database (run history, pause state, users) and `airflow.cfg` |
 | `airflow/dags` | `/opt/airflow/dags` |
 | `airflow/plugins` | `/opt/airflow/plugins` |
 | `source_data` | `/opt/airflow/source_data` |
 | `dbt_transform` | `/opt/airflow/dbt_transform` |
+
+Before 17 Nov 2026, the metadata database lived only inside the container, so recreating Airflow wiped its run
+history and paused every DAG. When the volume was introduced, the existing `airflow.db` and `airflow.cfg` were copied
+into it before the new container's first start, so no history was lost.
+
+**Restart policy:** every service has `restart: unless-stopped`, and Docker Desktop starts on sign-in. After a reboot,
+the whole stack comes back by itself. A daily run missed while the laptop was off is run once when Airflow starts,
+because the DAGs use `catchup=False`.
 
 **dbt** has its own container that idles (`tail -f /dev/null`) so you can run commands in it.
 
@@ -1400,7 +1422,7 @@ selecting EUR shows only EUR transactions, in euros.
 `superset/build_dashboard.py` runs inside the Superset container and uses the REST API:
 
 1. Log in, get a CSRF token.
-2. Create the ClickHouse connection (tested first) or reuse it.
+2. Create the ClickHouse connection (tested first), or update the existing one's login.
 3. Create or update the 4 datasets.
 4. For each chart: run its query through `/api/v1/chart/data` to prove it returns data, then create or update it.
 5. Lay out the dashboard (`position_json`) and set the filters (`json_metadata`).
@@ -1442,7 +1464,9 @@ Every change went on a feature branch, branched from the latest `origin/main`, m
 | #7 | `docs/payflow-course` | This course |
 | #8 | `chore/remove-unused-files` | Removed unused files and the documents this course replaced |
 | #9 | `ci/github-actions` | CI level 1: syntax, DAG import, `dbt parse`, secret scan (Module 17) |
-| next | `ci/dbt-build` | CI level 2: full `dbt build` on ClickHouse with sample data (Module 17) |
+| #10 | `ci/dbt-build` | CI level 2: full `dbt build` on ClickHouse with sample data (Module 17) |
+| next | `test/scd2-real-changes` | SCD2 test: every version must be a real change |
+| next | `ops/autostart-and-secrets` | Restart policies, Airflow data volume, PID fix, passwords from `.env`, dashboard login update |
 
 After merging, branches were deleted locally (`git branch -d`, which refuses unmerged work) and on GitHub, after
 checking each was an ancestor of `origin/main`.
@@ -1488,12 +1512,16 @@ read-only (last seen with `ALL PRIVILEGES`).
 | 9 | Passwords in code, no `.gitignore` | Search before first push | `.env`, `.gitignore` |
 | 10 | `README.md` had a UTF-16 line | Read before first commit | Rewritten as UTF-8 |
 | 11 | `DBT_PROJECT_DIR` pointed `dbt debug` at the Airflow path | Running `dbt debug` | Overridden in the dbt container |
-| 12 | Airflow web page would not open | Stale `airflow-webserver.pid` pointed at another process | Deleted the file, started the web server; permanent fix open |
+| 12 | Airflow web page would not open | Stale `airflow-webserver.pid` pointed at another process | Deleted the file, started the web server; later `rm -f /opt/airflow/*.pid` in the startup command |
 | 13 | New rows never reached silver | Silver 4 days older than bronze | `dbt_build` task in the DAG |
 | 14 | 1,273 transactions had no FX rate | Coverage check | Module 11 |
 | 15 | Generator rewrote past FX rates | Code review | Keep existing rates |
 | 16 | `fact_daily_balances` failed with a nested aggregate error | First gold build | Renamed an alias that shadowed its source column |
 | 17 | Currency filter did nothing on transaction charts | User testing | Separate Transaction currency filter, scoped to those charts |
+| 18 | Daily DAGs never ran on their own | Data only grew after a manual trigger | The laptop is off at 01:00 and 02:00 UTC, Docker Desktop did not start on sign-in, and the containers had no restart policy. Fixed with Docker autostart and `restart: unless-stopped` |
+| 19 | Superset restarted in a loop after the secret key change | `ValueError: Invalid decryption key` in its log | The stored ClickHouse connection was encrypted with the old key: `superset re-encrypt-secrets --previous_secret_key` |
+| 20 | Dashboard rebuild failed after the ClickHouse password change | `PUT dataset/1/refresh -> 500` | The build script reused the existing connection without updating its login; it now updates it |
+| 21 | `CLICKHOUSE_USER` in `.env` held a password | ClickHouse `AUTHENTICATION_FAILED` | Set back to `analytics` |
 
 ### Process lessons
 
@@ -1519,14 +1547,34 @@ read-only (last seen with `ALL PRIVILEGES`).
 
 ### Start and stop
 
+Normally there is nothing to do: Docker Desktop starts on sign-in, and the containers restart with it.
+
 ```powershell
-docker compose start clickhouse airflow dbt superset   # keeps Airflow run history
-docker compose stop                                     # stops everything
-docker compose up -d                                    # only when the config changed: recreates containers
+docker compose ps                                       # what is running
+docker compose up -d                                    # after a change to docker-compose.yml or .env
+docker compose stop                                     # stop everything (stays stopped until started again)
+docker compose start                                    # start again after a stop
 ```
 
-> `docker compose up -d` after a config change recreates Airflow, which wipes its SQLite run history and pauses all
-> DAGs. Unpause them afterwards.
+Run history survives `docker compose up -d`, because Airflow's database is in the `airflow_home` volume.
+
+### Changing a password
+
+1. Edit `.env`.
+2. Apply it:
+   - **Airflow or Superset admin password:** `docker compose up -d airflow` (or `superset`). The startup command resets
+     it from `.env`.
+   - **ClickHouse password:** `docker compose up -d`, then rebuild the dashboard (Module 12). The build script saves
+     the new login in Superset's connection.
+   - **MySQL passwords:** change them in MySQL first (`ALTER USER ...`), then `docker compose up -d airflow`.
+3. **Changing `SUPERSET_SECRET_KEY`:** Superset encrypts the stored ClickHouse connection with this key, and will not
+   start with a new key until the old secrets are re-encrypted:
+
+   ```powershell
+   docker compose stop superset
+   docker compose run --rm --no-deps --entrypoint superset superset re-encrypt-secrets --previous_secret_key "<old key>"
+   docker compose start superset
+   ```
 
 ### Links
 
@@ -1545,12 +1593,9 @@ docker exec airflow airflow dags trigger extract_full_loads
 docker exec airflow airflow dags list-import-errors
 ```
 
-**If the Airflow page does not open** but the container is running:
-
-```powershell
-docker exec airflow rm -f /opt/airflow/airflow-webserver.pid
-docker exec -d airflow airflow webserver
-```
+**If the Airflow page does not open**, first wait 2 to 3 minutes after a start: the container installs its packages
+before the web server comes up. The stale PID file problem is fixed in the startup command; `docker compose restart
+airflow` clears it if it ever comes back.
 
 ### dbt
 
@@ -1600,20 +1645,23 @@ ORDER BY
 | `raw_accounts` has no `created_at` | About 62% of `fact_daily_balances` rows have no `ReportedBalance`; `RunningNetFlowUsd` is not affected |
 | No high-risk customers in the data | The risk charts show low and medium only |
 | About 2 hours each night without today's FX rate | Tests ignore today's rows |
-| Airflow standalone uses SQLite | Recreating the container loses run history |
+| Airflow standalone uses SQLite and the SequentialExecutor | One task at a time; fine for this volume. The database is in a volume, so history survives a recreate |
+| The stack runs on a laptop | Nothing runs while it is off; missed daily runs run once at the next start |
 | Superset has no amount-input box | The FX converter is a rate lookup, not a calculator |
 
 ### Next steps
 
 - [ ] Change the MySQL root password; make `banking_user` read-only.
-- [ ] Add the PID file removal to Airflow's startup command.
+- [x] Add the PID file removal to Airflow's startup command.
 - [ ] Run the risk tiers test (SGP medium → high).
 - [ ] Decide whether to trim about 10 redundant gold tests.
 - [ ] Switch `app_events`, then `transactions`, to incremental when builds slow down.
 - [x] CI level 1: syntax, DAG import, `dbt parse` and secret scan on every pull request (Module 17).
 - [x] CI level 2: full `dbt build` against a temporary ClickHouse with sample data (Module 17).
-- [ ] Start Docker Desktop on sign-in and give the containers `restart: unless-stopped`, so the daily DAGs run
+- [x] Start Docker Desktop on sign-in and give the containers `restart: unless-stopped`, so the daily DAGs run
   without a manual start.
+- [x] Real Superset secret key; admin passwords applied from `.env` on every start.
+- [x] SCD2 test: every version must be a real change.
 - [ ] README screenshots.
 
 ---

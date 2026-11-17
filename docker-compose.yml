@@ -3,6 +3,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:25.8
     container_name: clickhouse_dwh
+    restart: unless-stopped
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
@@ -24,6 +25,7 @@ services:
   airflow:
     image: apache/airflow:2.10.3-python3.11
     container_name: airflow
+    restart: unless-stopped
     env_file: .env
     environment:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -33,15 +35,18 @@ services:
       - bash
       - -c
       - |
+        rm -f /opt/airflow/*.pid &&
         ([ -x /home/airflow/dbt_venv/bin/dbt ] || (python -m venv /home/airflow/dbt_venv &&
           /home/airflow/dbt_venv/bin/pip install -q dbt-core==1.11.12 dbt-clickhouse==1.10.1)) &&
         airflow db migrate &&
         (airflow users create --username "$${AIRFLOW_ADMIN_USER}" --password "$${AIRFLOW_ADMIN_PASSWORD}" \
           --firstname Admin --lastname User --role Admin --email admin@example.com || true) &&
+        airflow users reset-password --username "$${AIRFLOW_ADMIN_USER}" --password "$${AIRFLOW_ADMIN_PASSWORD}" &&
         airflow standalone
     ports:
       - "8080:8080"
     volumes:
+      - airflow_home:/opt/airflow
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/logs:/opt/airflow/logs
@@ -56,6 +61,7 @@ services:
   dbt:
     image: dbt-clickhouse:1.11.12
     container_name: dbt
+    restart: unless-stopped
     env_file: .env
     environment:
       DBT_PROFILES_DIR: /usr/app
@@ -71,6 +77,7 @@ services:
   superset:
     image: apache/superset:4.1.1
     container_name: superset
+    restart: unless-stopped
     user: root
     environment:
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
@@ -84,6 +91,7 @@ services:
         superset db upgrade &&
         (superset fab create-admin --username "$${SUPERSET_ADMIN_USER}" --password "$${SUPERSET_ADMIN_PASSWORD}" \
           --firstname Admin --lastname User --email admin@example.com || true) &&
+        superset fab reset-password --username "$${SUPERSET_ADMIN_USER}" --password "$${SUPERSET_ADMIN_PASSWORD}" &&
         superset init &&
         /usr/bin/run-server.sh
     ports:
@@ -97,3 +105,4 @@ services:
 volumes:
   clickhouse_data:
   superset_home:
+  airflow_home:
