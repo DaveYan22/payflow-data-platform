@@ -1,5 +1,7 @@
 # PayFlow Data Platform: Global Fintech Analytics Pipeline
 
+[![CI](https://github.com/DaveYan22/payflow-data-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/DaveYan22/payflow-data-platform/actions/workflows/ci.yml)
+
 An ELT pipeline that moves core-banking data from MySQL (OLTP) into a ClickHouse warehouse and models it in
 bronze, silver and gold layers with dbt. Airflow orchestrates the loads. See `source_data/Data Architecture.jpg`
 and `source_data/ERD_core_banking.pdf`.
@@ -34,6 +36,8 @@ Full project documentation, including design decisions and the issues met along 
 | `dbt_transform/` | dbt project (ClickHouse adapter): `models/bronze`, `silver`, `gold`, plus `tests/` and `macros/` |
 | `superset/build_dashboard.py` | Builds or updates the PayFlow Overview dashboard through the Superset API |
 | `docs/` | Project documentation and a PDF snapshot of the dashboard |
+| `.github/workflows/ci.yml` | CI on every pull request: Python syntax, Airflow DAG import, `dbt parse`, secret scan |
+| `ci/` | Scripts used by CI |
 
 ## Quick start
 

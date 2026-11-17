@@ -31,6 +31,7 @@ Numbers in this course are as of 9 Nov 2026 unless stated otherwise.
 | 14 | [Troubleshooting and lessons learned](#module-14-troubleshooting-and-lessons-learned) |
 | 15 | [Operations cheat sheet](#module-15-operations-cheat-sheet) |
 | 16 | [Known limits and next steps](#module-16-known-limits-and-next-steps) |
+| 17 | [CI/CD with GitHub Actions](#module-17-cicd-with-github-actions) |
 | A | [Glossary](#appendix-glossary) |
 
 ---
@@ -1438,9 +1439,23 @@ Every change went on a feature branch, branched from the latest `origin/main`, m
 | #4 | `feature/dbt-build-in-incremental-dag` | dbt runs from Airflow |
 | #5 | `feature/gold-layer` | Gold layer, generator FX fix, tests by layer, documentation |
 | #6 | `feature/superset-dashboard` | Dashboard build script, PDF snapshot |
+| #7 | `docs/payflow-course` | This course |
+| #8 | `chore/remove-unused-files` | Removed unused files and the documents this course replaced |
+| next | `ci/github-actions` | CI checks on every pull request (Module 17) |
 
 After merging, branches were deleted locally (`git branch -d`, which refuses unmerged work) and on GitHub, after
 checking each was an ancestor of `origin/main`.
+
+### Protecting `main`
+
+A GitHub branch ruleset (**Settings → Rules → Rulesets**, target: default branch) protects `main`:
+
+| Rule | Why |
+|---|---|
+| Restrict deletions | `main` cannot be deleted by mistake |
+| Block force pushes | History on `main` cannot be rewritten |
+| Require a pull request, 0 approvals | Every change goes through a PR; 0 approvals because GitHub does not let you approve your own PR |
+| Require status checks (after Module 17) | A PR can only be merged when CI is green |
 
 ### Security practices
 
@@ -1594,7 +1609,163 @@ ORDER BY
 - [ ] Run the risk tiers test (SGP medium → high).
 - [ ] Decide whether to trim about 10 redundant gold tests.
 - [ ] Switch `app_events`, then `transactions`, to incremental when builds slow down.
-- [ ] Add CI checks (`dbt build` on pull requests) and README screenshots.
+- [x] CI level 1: syntax, DAG import, `dbt parse` and secret scan on every pull request (Module 17).
+- [ ] CI level 2: full `dbt build` against a temporary ClickHouse with sample data.
+- [ ] Start Docker Desktop on sign-in and give the containers `restart: unless-stopped`, so the daily DAGs run
+  without a manual start.
+- [ ] README screenshots.
+
+---
+
+## Module 17: CI/CD with GitHub Actions
+
+### Learning goals
+
+- Understand CI and CD, and which of them this project needs.
+- Read the CI workflow and know what each check catches.
+- Use CI results to decide whether a pull request can be merged.
+
+### CI and CD
+
+| Term | Meaning | In this project |
+|---|---|---|
+| **CI** (continuous integration) | Every change is checked automatically before it is merged | ✅ GitHub Actions runs 4 checks on every pull request |
+| **CD** (continuous delivery or deployment) | Every merged change is released automatically | Not needed: the stack runs on a laptop, see below |
+
+### What runs, and when
+
+The workflow is `.github/workflows/ci.yml`. It runs:
+
+- on every pull request into `main`
+- on every push to `main`, after a merge
+- by hand, from **Actions → CI → Run workflow**
+
+Each check is a separate job on a fresh Ubuntu machine. All 4 run in parallel, and each shows as its own line on the
+pull request.
+
+```text
+push branch --> open PR --> GitHub Actions
+                              |-- Python syntax        (~20 s)
+                              |-- Airflow DAG import   (~1-2 min)
+                              |-- dbt parse            (~40 s)
+                              |-- Secret scan          (~20 s)
+                              v
+                    all green ✅ --> merge     any red ❌ --> open the log, fix, push again
+```
+
+`concurrency` cancels an older run when a new commit is pushed to the same branch, and `permissions: contents: read`
+means the workflow can only read the repository.
+
+### The four checks
+
+| Job | What it does | What it catches | Example |
+|---|---|---|---|
+| **Python syntax** | `python -m compileall` on `airflow/`, `source_data/`, `mock_data/`, `superset/`, `ci/` | A file Python cannot even read | A missing `)` in a DAG |
+| **Airflow DAG import** | Installs Airflow 2.10.3 with the same packages as `docker-compose.yml`, then loads every DAG like the scheduler does (`ci/check_dag_imports.py`) | DAGs that would show as "Broken DAG" and stop running | A wrong import, a missing package, a dependency loop, a deleted DAG |
+| **dbt parse** | Installs dbt 1.11.12 and dbt-clickhouse 1.10.1, then runs `dbt parse` and counts models and tests | A dbt project that would fail the hourly `dbt build` | `ref('fx_rate')` instead of `ref('fx_rates')`, bad YAML in `schema.yml`, a broken Jinja tag |
+| **Secret scan** | Fails if `.env` is tracked, then scans the **whole git history** with gitleaks | Passwords, keys and tokens committed by mistake | A committed `.env`, a hardcoded password, an API key |
+
+### How the DAG check works
+
+```python
+from airflow.models import DagBag
+
+EXPECTED_DAGS = {"extract_incremental_loads", "extract_full_loads", "generate_daily_data"}
+
+dag_bag = DagBag(dag_folder=dag_folder, include_examples=False)
+```
+
+`DagBag` is the class the Airflow scheduler uses to read the DAG folder. The script fails if:
+
+- any file has an import error
+- one of the 3 expected DAGs is missing
+- a DAG has no tasks
+
+`PYTHONPATH=airflow/plugins` lets the DAGs import `fintech_el`, as they do in the container.
+
+The DAGs only read passwords and hosts **inside tasks**, not when the file is imported. That is why the check can
+load them with no database and no `.env`.
+
+### Why dbt parse needs no database
+
+`dbt parse` reads every model, test, macro and YAML file and builds the project's lineage, but never connects to
+ClickHouse. `profiles.yml` still needs `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD` to be set, so the workflow sets
+them to the dummy value `ci`. The check confirms the project still has 82 models and tests (13 models, 69 tests).
+
+What it does **not** catch is SQL that is valid Jinja but wrong for ClickHouse, or a broken business rule. That
+needs a real `dbt build`, which is CI level 2.
+
+### How it was tested before the first push
+
+Each check was first run locally against the same tools:
+
+| Check | Local test | Result |
+|---|---|---|
+| Python syntax | `python -m compileall` | Passed |
+| DAG import | The script inside the Airflow container | 3 DAGs loaded (3, 3 and 2 tasks) |
+| DAG import, failure case | Same script on a copy of the DAGs plus one with a bad import | Failed, as it should |
+| dbt parse | In the dbt container with an unreachable host and a fake login | Passed, 82 nodes |
+| Secret scan | gitleaks over the full history | No leaks found |
+
+### Reading a failed run
+
+1. On the pull request, click **Details** next to the red check.
+2. Open the red step. The error is usually in its last lines:
+   - **DAG import:** `IMPORT ERROR in <file>` followed by the Python traceback.
+   - **dbt parse:** the model or YAML file and the line.
+   - **Secret scan:** the file, the commit and the rule that matched, with the value redacted.
+3. Fix it on the same branch and push. CI runs again by itself.
+
+If gitleaks finds a real secret, removing it in a new commit is not enough: it is still in the history. **Change the
+password first**, then decide whether to rewrite the history.
+
+### Making CI required
+
+In the `main` branch ruleset, under **Require status checks to pass**, add the 4 checks:
+
+- `Python syntax`
+- `Airflow DAG import`
+- `dbt parse`
+- `Secret scan`
+
+From then on, GitHub disables the merge button until all 4 are green. The checks only appear in the list after the
+workflow has run once.
+
+### CD: why there is none, and what it would look like
+
+The DAG and dbt folders are mounted into the containers (Module 1). Deploying is therefore:
+
+```powershell
+git switch main
+git pull
+```
+
+Airflow picks up the new DAGs and dbt models on its next run. There is no server, image or registry to release to.
+
+On a real server, CD would be another workflow, triggered by a merge to `main`:
+
+1. Build the Airflow and dbt Docker images, with the code inside them rather than mounted.
+2. Push them to a registry, such as GitHub Container Registry, tagged with the commit hash.
+3. Deploy to the server, for example over SSH with `docker compose pull && docker compose up -d`, or to Kubernetes.
+4. Run a smoke test, such as `dbt test` or triggering a DAG, and roll back to the previous tag if it fails.
+
+### CI level 2: full dbt build (next step)
+
+The next step would run every model and test in CI:
+
+1. Start ClickHouse 25.8 as a service container in the job.
+2. Create the bronze tables and load a small, fixed sample data set, committed to the repo, that passes all 69 tests.
+3. Run `dbt build`.
+
+This catches ClickHouse SQL errors and broken business rules before merging, at the cost of keeping the sample data
+up to date as the models change.
+
+### Key takeaways
+
+- CI checks every change the same way, before it reaches the running pipeline.
+- Cheap checks (syntax, imports, parse, secrets) catch most mistakes in under 2 minutes, with no data or passwords.
+- Test a CI check locally, including making it fail on purpose, before trusting it.
+- CD only pays off when there is somewhere to deploy to.
 
 ---
 
@@ -1621,3 +1792,10 @@ ORDER BY
 | **Singular test** | A custom SQL query that fails if it returns rows |
 | **ASOF JOIN** | A ClickHouse join that matches the latest row at or before a given value |
 | **Native filter** | A Superset dashboard filter applied to charts in its scope |
+| **CI** | Continuous integration: automatic checks on every change before it is merged |
+| **CD** | Continuous delivery or deployment: automatic release of every merged change |
+| **GitHub Actions** | GitHub's service that runs workflows (such as CI) on its own machines |
+| **Workflow / job / step** | A workflow file holds jobs; each job runs on its own machine as a list of steps |
+| **Status check** | A CI result shown on a pull request; a ruleset can require it before merging |
+| **gitleaks** | A tool that scans files and git history for passwords, keys and tokens |
+| **DagBag** | The Airflow class that reads a DAG folder and reports import errors |
