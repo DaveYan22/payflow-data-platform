@@ -1707,6 +1707,18 @@ Each check was first run locally against the same tools:
 | dbt parse | In the dbt container with an unreachable host and a fake login | Passed, 82 nodes |
 | Secret scan | gitleaks over the full history | No leaks found |
 
+**The DAG check still failed on its first run on GitHub.** Testing inside the Airflow container hid two differences
+from the CI machine:
+
+| Problem | Why the local test missed it | Fix |
+|---|---|---|
+| `No module named 'pandas'` in `extract_full_loads.py` | The `apache/airflow` image comes with pandas; a plain `pip install apache-airflow` does not | Install `pandas==2.1.4`, the image's version |
+| `no such table: dag` | `dag_bag.get_dag()` also queries Airflow's metadata database. The container has one; CI does not | Read DAGs from `dag_bag.dags` |
+
+The fix was then tested the way GitHub runs it: a clean `python:3.11-slim` container, the workflow's install
+commands, no metadata database. **Lesson:** test a CI check in an environment as bare as the CI machine, not in the
+environment the code normally runs in.
+
 ### Reading a failed run
 
 1. On the pull request, click **Details** next to the red check.
